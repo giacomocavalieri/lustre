@@ -506,7 +506,8 @@ fn do_diff(
       )
     }
 
-    [UnsafeInnerHtml(..) as prev, ..old], [UnsafeInnerHtml(..) as next, ..new] -> {
+    [UnsafeInnerHtml(..) as prev, ..old], [UnsafeInnerHtml(..) as next, ..new]
+    -> {
       let child_path = path.add(path, node_index, next.key)
 
       let AttributeChange(events:, added: added_attrs, removed: removed_attrs) =

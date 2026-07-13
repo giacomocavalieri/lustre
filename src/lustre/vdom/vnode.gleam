@@ -259,7 +259,14 @@ fn text_to_json(kind, key, content) {
   |> json_object_builder.build
 }
 
-fn unsafe_inner_html_to_json(kind, key, namespace, tag, attributes, inner_html) {
+fn unsafe_inner_html_to_json(
+  kind,
+  key,
+  namespace,
+  tag,
+  attributes,
+  inner_html,
+) {
   json_object_builder.tagged(kind)
   |> json_object_builder.string("key", key)
   |> json_object_builder.string("namespace", namespace)
