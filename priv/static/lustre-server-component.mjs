@@ -89,8 +89,8 @@ var replace_kind = 5;
 var insert_kind = 6;
 
 // build/dev/javascript/lustre/lustre/vdom/path.mjs
-var separator_element = "	";
 var separator_subtree = "\r";
+var separator_element = "	";
 
 // build/dev/javascript/lustre/lustre/internals/list.ffi.mjs
 var iterate = (list4, callback) => {
@@ -615,12 +615,22 @@ var ContextRequestEvent = class extends Event {
     this.subscribe = subscribe;
   }
 };
+var LustreEvent = class extends CustomEvent {
+  // We can't rely on `instanceof` checks because the server component client
+  // runtime is bundled on its own and thus will have its own copy of this class.
+  isLustreEvent = true;
+  constructor(name, detail) {
+    super(name, { detail, bubbles: true, composed: true });
+  }
+};
 
 // build/dev/javascript/lustre/lustre/runtime/transport.mjs
 var mount_kind = 0;
 var reconcile_kind = 1;
 var emit_kind = 2;
 var provide_kind = 3;
+var subscribe_kind = 4;
+var unsubscribe_kind = 5;
 var attribute_changed_kind = 0;
 var event_fired_kind = 1;
 var property_changed_kind = 2;
@@ -644,7 +654,7 @@ var ServerComponent = class extends HTMLElement {
   #connected = false;
   #changedAttributesQueue = [];
   #contexts = /* @__PURE__ */ new Map();
-  #contextSubscriptions = /* @__PURE__ */ new Set();
+  #contextSubscriptions = /* @__PURE__ */ new Map();
   #observer = new MutationObserver((mutations) => {
     const attributes = [];
     for (const mutation of mutations) {
@@ -774,16 +784,7 @@ var ServerComponent = class extends HTMLElement {
           this.provide(key, value);
         }
         for (const key of [...new Set(data.requested_contexts)]) {
-          this.dispatchEvent(
-            new ContextRequestEvent(key, (value, unsubscribe) => {
-              this.#transport?.send({
-                kind: context_provided_kind,
-                key,
-                value
-              });
-              this.#contextSubscriptions.add(unsubscribe);
-            })
-          );
+          this.subscribe(key);
         }
         if (messages.length) {
           this.#transport.send({
@@ -820,21 +821,26 @@ var ServerComponent = class extends HTMLElement {
         break;
       }
       case emit_kind: {
-        this.dispatchEvent(new CustomEvent(data.name, { detail: data.data }));
+        this.dispatchEvent(new LustreEvent(data.name, data.data));
         break;
       }
       case provide_kind: {
         this.provide(data.key, data.value);
         break;
       }
+      case subscribe_kind: {
+        this.subscribe(data.key);
+        break;
+      }
+      case unsubscribe_kind: {
+        this.unsubscribe(data.key);
+        break;
+      }
     }
   }
   //
   disconnectedCallback() {
-    for (const unsubscribe of this.#contextSubscriptions) {
-      unsubscribe();
-    }
-    this.#contextSubscriptions.clear();
+    this.unsubscribeAll();
     if (this.#transport) {
       this.#transport.close();
       this.#transport = null;
@@ -856,6 +862,31 @@ var ServerComponent = class extends HTMLElement {
         subscriber(value, unsubscribe);
       }
     }
+  }
+  subscribe(key) {
+    if (!key) return;
+    this.#contextSubscriptions.get(key)?.();
+    this.dispatchEvent(
+      new ContextRequestEvent(key, (value, unsubscribe) => {
+        this.#transport?.send({
+          kind: context_provided_kind,
+          key,
+          value
+        });
+        this.#contextSubscriptions.get(key)?.();
+        this.#contextSubscriptions.set(unsubscribe);
+      })
+    );
+  }
+  unsubscribe(key) {
+    this.#contextSubscriptions.get(key)?.();
+    this.#contextSubscriptions.delete(key);
+  }
+  unsubscribeAll() {
+    for (const [_, unsubscribe] of this.#contextSubscriptions) {
+      unsubscribe?.();
+    }
+    this.#contextSubscriptions.clear();
   }
   #getCsrfToken() {
     if (this.hasAttribute("csrf-token")) {
@@ -930,6 +961,9 @@ var ServerComponent = class extends HTMLElement {
    */
   #createServerEvent(event2, include = []) {
     const data = {};
+    if (event2.isLustreEvent) {
+      include.push("detail");
+    }
     if (event2.type === "input" || event2.type === "change") {
       if (event2.target.type === "checkbox") {
         include.push("target.checked");
